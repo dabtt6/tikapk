@@ -43,4 +43,7 @@ nano links.txt
 ```
 paste link ctrl+x +y
 
-5.node index.js
+5.run
+```
+node index.js
+`•
