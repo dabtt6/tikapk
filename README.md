@@ -37,7 +37,10 @@ A powerful Node.js command-line tool for downloading TikTok videos and images wi
     npm install
     ```
 
-4. nano links.txt
+4.input link
+```bash
+nano links.txt
+```
 paste link ctrl+x +y
 
-5 node index.js
+5.node index.js
