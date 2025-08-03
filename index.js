@@ -1,77 +1,102 @@
-const fs = require("fs");
-const path = require("path");
+const fs = require('fs');
+const https = require('https');
+const path = require('path');
+const os = require('os');
+const readline = require('readline');
 
-const { validateURL } = require("./utils/urlUtils");
-const { processVideoPost } = require("./processors/videoProcessor");
-const { processPhotoPost } = require("./processors/photoProcessor");
+const links = fs.readFileSync('links.txt', 'utf-8').split('\n').map(l => l.trim()).filter(Boolean);
+const logSuccess = 'log_success.txt';
+const logError = 'log_error.txt';
+const downloadedLinks = fs.existsSync(logSuccess) ? fs.readFileSync(logSuccess, 'utf-8').split('\n') : [];
 
-const LINKS_FILE = "links.txt";
+let downloadedCount = 0;
 
-/**
- * Đọc danh sách URL từ file txt
- * @param {string} filePath - Đường dẫn đến file chứa link
- * @returns {string[]} - Mảng các URL
- */
-function readLinks(filePath) {
-  try {
-    const data = fs.readFileSync(filePath, "utf8");
-    return data
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line !== "");
-  } catch (err) {
-    console.error("❌ Không đọc được file links.txt:", err.message);
-    return [];
+function ensureDir(dir) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
 }
 
-/**
- * Xử lý từng URL TikTok
- * @param {string[]} urls - Danh sách URL
- */
-const processUrls = async (urls) => {
-  console.log(`🚀 Bắt đầu xử lý ${urls.length} TikTok URL...`);
+function downloadFile(url, index) {
+  return new Promise((resolve) => {
+    const fileName = path.basename(new URL(url).pathname.split('?')[0]);
+    const filePath = path.join(__dirname, 'downloads', fileName);
 
-  for (let i = 0; i < urls.length; i++) {
-    const url = urls[i];
-
-    if (!validateURL(url)) {
-      console.error(`⚠️  Link không hợp lệ: ${url}`);
-      continue;
+    if (downloadedLinks.includes(url) || fs.existsSync(filePath)) {
+      console.log(`[${index + 1}/${links.length}] ✅ Bỏ qua: ${fileName}`);
+      downloadedCount++;
+      return resolve();
     }
 
-    try {
-      // Tránh bị rate-limit
-      if (i > 0) await new Promise((r) => setTimeout(r, 2000));
+    const file = fs.createWriteStream(filePath);
 
-      if (url.includes("/photo/")) {
-        await processPhotoPost(url);
-      } else {
-        await processVideoPost(url);
+    https.get(url, (response) => {
+      if (response.statusCode !== 200) {
+        console.log(`[${index + 1}/${links.length}] ❌ HTTP ${response.statusCode}: ${fileName}`);
+        fs.appendFileSync(logError, `${url}${os.EOL}`);
+        file.close();
+        fs.unlinkSync(filePath);
+        return resolve();
       }
-    } catch (err) {
-      console.error(`❌ Lỗi khi xử lý ${url}: ${err.message}`);
+
+      response.pipe(file);
+      file.on('finish', () => {
+        file.close();
+        fs.appendFileSync(logSuccess, `${url}${os.EOL}`);
+        downloadedCount++;
+        console.log(`[${index + 1}/${links.length}] ✅ Tải xong: ${fileName}`);
+        resolve();
+      });
+    }).on('error', (err) => {
+      console.log(`[${index + 1}/${links.length}] ❌ Lỗi kết nối: ${fileName}`);
+      fs.appendFileSync(logError, `${url}${os.EOL}`);
+      resolve();
+    });
+  });
+}
+
+async function askConcurrency() {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  const question = (q) => new Promise((res) => rl.question(q, res));
+
+  let input = await question("👉 Bạn muốn tải bao nhiêu file cùng lúc? (mặc định 10): ");
+  rl.close();
+
+  let num = parseInt(input);
+  return isNaN(num) || num < 1 ? 10 : num;
+}
+
+async function downloadAll() {
+  ensureDir('downloads');
+
+  const CONCURRENT_DOWNLOADS = await askConcurrency();
+
+  console.log(`\n🚀 Bắt đầu tải ${links.length} link (song song ${CONCURRENT_DOWNLOADS} mỗi lượt)...\n`);
+
+  let index = 0;
+
+  async function nextBatch() {
+    const batch = [];
+
+    for (let i = 0; i < CONCURRENT_DOWNLOADS && index < links.length; i++) {
+      batch.push(downloadFile(links[index], index));
+      index++;
+    }
+
+    await Promise.allSettled(batch);
+
+    if (index < links.length) {
+      await nextBatch();
     }
   }
 
-  console.log("✅ Hoàn tất xử lý tất cả link.");
-};
+  await nextBatch();
 
-/**
- * Điểm khởi chạy ứng dụng
- */
-(async () => {
-  const urls = readLinks(LINKS_FILE);
+  console.log(`\n✅ Đã tải thành công ${downloadedCount}/${links.length} link.`);
+}
 
-  if (urls.length === 0) {
-    console.log("⚠️ Không có link nào trong links.txt");
-    process.exit(0);
-  }
-
-  try {
-    await processUrls(urls);
-  } catch (err) {
-    console.error(`🔥 Lỗi nghiêm trọng: ${err.message}`);
-    process.exit(1);
-  }
-})();
+downloadAll();
