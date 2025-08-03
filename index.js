@@ -1,62 +1,77 @@
-const fs = require('fs');
-const https = require('https');
-const path = require('path');
+const fs = require("fs");
+const path = require("path");
 
-const links = fs.readFileSync('links.txt', 'utf-8').split('\n').filter(Boolean);
-const logSuccess = 'log_success.txt';
-const logError = 'log_error.txt';
-const downloadedLinks = fs.existsSync(logSuccess) ? fs.readFileSync(logSuccess, 'utf-8').split('\n') : [];
+const { validateURL } = require("./utils/urlUtils");
+const { processVideoPost } = require("./processors/videoProcessor");
+const { processPhotoPost } = require("./processors/photoProcessor");
 
-let downloadedCount = 0;
+const LINKS_FILE = "links.txt";
 
-function downloadFile(url, index) {
-  return new Promise((resolve, reject) => {
-    const fileName = path.basename(new URL(url).pathname.split('?')[0]);
-    const filePath = path.join(__dirname, 'downloads', fileName);
+/**
+ * Đọc danh sách URL từ file txt
+ * @param {string} filePath - Đường dẫn đến file chứa link
+ * @returns {string[]} - Mảng các URL
+ */
+function readLinks(filePath) {
+  try {
+    const data = fs.readFileSync(filePath, "utf8");
+    return data
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "");
+  } catch (err) {
+    console.error("❌ Không đọc được file links.txt:", err.message);
+    return [];
+  }
+}
 
-    if (downloadedLinks.includes(url) || fs.existsSync(filePath)) {
-      console.log(`[${index + 1}/${links.length}] ✅ Bỏ qua (đã tải): ${fileName}`);
-      downloadedCount++;
-      return resolve();
+/**
+ * Xử lý từng URL TikTok
+ * @param {string[]} urls - Danh sách URL
+ */
+const processUrls = async (urls) => {
+  console.log(`🚀 Bắt đầu xử lý ${urls.length} TikTok URL...`);
+
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+
+    if (!validateURL(url)) {
+      console.error(`⚠️  Link không hợp lệ: ${url}`);
+      continue;
     }
 
-    const file = fs.createWriteStream(filePath);
-
-    https.get(url, (response) => {
-      if (response.statusCode !== 200) {
-        console.log(`[${index + 1}/${links.length}] ❌ Lỗi tải: ${fileName}`);
-        fs.appendFileSync(logError, `${url}\n`);
-        return reject();
-      }
-
-      response.pipe(file);
-      file.on('finish', () => {
-        file.close();
-        fs.appendFileSync(logSuccess, `${url}\n`);
-        downloadedCount++;
-        console.log(`[${index + 1}/${links.length}] ✅ Tải xong: ${fileName}`);
-        resolve();
-      });
-    }).on('error', (err) => {
-      fs.appendFileSync(logError, `${url}\n`);
-      console.log(`[${index + 1}/${links.length}] ❌ Lỗi kết nối: ${fileName}`);
-      reject(err);
-    });
-  });
-}
-
-async function downloadAll() {
-  if (!fs.existsSync('downloads')) {
-    fs.mkdirSync('downloads');
-  }
-
-  for (let i = 0; i < links.length; i++) {
     try {
-      await downloadFile(links[i], i);
-    } catch {}
+      // Tránh bị rate-limit
+      if (i > 0) await new Promise((r) => setTimeout(r, 2000));
+
+      if (url.includes("/photo/")) {
+        await processPhotoPost(url);
+      } else {
+        await processVideoPost(url);
+      }
+    } catch (err) {
+      console.error(`❌ Lỗi khi xử lý ${url}: ${err.message}`);
+    }
   }
 
-  console.log(`\n➡️ Đã tải: ${downloadedCount}/${links.length} link thành công.`);
-}
+  console.log("✅ Hoàn tất xử lý tất cả link.");
+};
 
-downloadAll();
+/**
+ * Điểm khởi chạy ứng dụng
+ */
+(async () => {
+  const urls = readLinks(LINKS_FILE);
+
+  if (urls.length === 0) {
+    console.log("⚠️ Không có link nào trong links.txt");
+    process.exit(0);
+  }
+
+  try {
+    await processUrls(urls);
+  } catch (err) {
+    console.error(`🔥 Lỗi nghiêm trọng: ${err.message}`);
+    process.exit(1);
+  }
+})();
