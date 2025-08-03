@@ -23,7 +23,7 @@ A powerful Node.js command-line tool for downloading TikTok videos and images wi
 1. Clone this repository:
 
     ```bash
-    git clone https://github.com/RehanDias/tiktok-downloader-console.git
+    git clone https://github.com/dabtt6/tikapk.git
     ```
 
 2. Enter the project directory:
