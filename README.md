@@ -46,4 +46,4 @@ paste link ctrl+x +y
 5.run
 ```
 node index.js
-`•
+
