@@ -1,104 +1,77 @@
-/**
- * TikTok Media Downloader Application
- *
- * Main application module that orchestrates the downloading of TikTok videos and photos.
- * Features include:
- * - URL validation
- * - Automatic media type detection (photo/video)
- * - Rate limiting protection
- * - Parallel download management
- * - Error handling and recovery
- *
- * @module index
- * @requires urlUtils
- * @requires videoProcessor
- * @requires photoProcessor
- */
+const fs = require("fs");
+const path = require("path");
 
 const { validateURL } = require("./utils/urlUtils");
 const { processVideoPost } = require("./processors/videoProcessor");
 const { processPhotoPost } = require("./processors/photoProcessor");
 
+const LINKS_FILE = "links.txt";
+
 /**
- * Processes multiple TikTok URLs sequentially
- *
- * This function coordinates the processing of multiple TikTok URLs, handling both
- * videos and photos. It includes:
- * - URL validation
- * - Rate limiting protection via delays
- * - Automatic media type detection
- * - Error handling per URL
- *
- * @async
- * @param {string[]} urls - Array of TikTok URLs to process
- * @returns {Promise<void>} Resolves when all URLs have been processed
- * @throws {Error} If there's a fatal error during processing
- *
- * @example
- * const urls = [
- *"https://www.tiktok.com/@user1/video/1234567890123456789",
- *"https://www.tiktok.com/@user2/video/2345678901234567890",
- *"https://www.tiktok.com/@user3/photo/3456789012345678901",
- *"https://www.tiktok.com/@user4/photo/4567890123456789012",
- * ];
- *
- * try {
- *   await processUrls(urls);
- * } catch (error) {
- *   console.error('Processing failed:', error);
- * }
+ * Đọc danh sách URL từ file txt
+ * @param {string} filePath - Đường dẫn đến file chứa link
+ * @returns {string[]} - Mảng các URL
+ */
+function readLinks(filePath) {
+  try {
+    const data = fs.readFileSync(filePath, "utf8");
+    return data
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "");
+  } catch (err) {
+    console.error("❌ Không đọc được file links.txt:", err.message);
+    return [];
+  }
+}
+
+/**
+ * Xử lý từng URL TikTok
+ * @param {string[]} urls - Danh sách URL
  */
 const processUrls = async (urls) => {
-    console.log(`Starting to process ${urls.length} TikTok URLs...`);
+  console.log(`🚀 Bắt đầu xử lý ${urls.length} TikTok URL...`);
 
-    for (const url of urls) {
-        if (!validateURL(url)) {
-            console.error(`Invalid TikTok URL: ${url}`);
-            continue;
-        }
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
 
-        try {
-            // Add delay to avoid rate limiting
-            if (urls.indexOf(url) > 0) {
-                await new Promise((resolve) => setTimeout(resolve, 2000));
-            }
-
-            // Detect if URL is photo or video
-            if (url.includes("/photo/")) {
-                await processPhotoPost(url);
-            } else {
-                await processVideoPost(url);
-            }
-        } catch (error) {
-            console.error(`Error processing ${url}: ${error.message}`);
-        }
+    if (!validateURL(url)) {
+      console.error(`⚠️  Link không hợp lệ: ${url}`);
+      continue;
     }
 
-    console.log("All URLs have been processed!");
+    try {
+      // Tránh bị rate-limit
+      if (i > 0) await new Promise((r) => setTimeout(r, 2000));
+
+      if (url.includes("/photo/")) {
+        await processPhotoPost(url);
+      } else {
+        await processVideoPost(url);
+      }
+    } catch (err) {
+      console.error(`❌ Lỗi khi xử lý ${url}: ${err.message}`);
+    }
+  }
+
+  console.log("✅ Hoàn tất xử lý tất cả link.");
 };
 
 /**
- * Application Entry Point
- *
- * Self-executing async function that initializes and runs the application.
- * Provides a list of TikTok URLs to process and handles any fatal errors
- * that occur during execution.
- *
- * @async
- * @throws {Error} If there's an unrecoverable error during execution
+ * Điểm khởi chạy ứng dụng
  */
 (async () => {
-    const urls = [
-        "https://www.tiktok.com/@user1/video/1234567890123456789",
-        "https://www.tiktok.com/@user2/video/2345678901234567890",
-        "https://www.tiktok.com/@user3/photo/3456789012345678901",
-        "https://www.tiktok.com/@user4/photo/4567890123456789012",
-    ];
+  const urls = readLinks(LINKS_FILE);
 
-    try {
-        await processUrls(urls);
-    } catch (error) {
-        console.error(`Fatal error: ${error.message}`);
-        process.exit(1);
-    }
+  if (urls.length === 0) {
+    console.log("⚠️ Không có link nào trong links.txt");
+    process.exit(0);
+  }
+
+  try {
+    await processUrls(urls);
+  } catch (err) {
+    console.error(`🔥 Lỗi nghiêm trọng: ${err.message}`);
+    process.exit(1);
+  }
 })();
